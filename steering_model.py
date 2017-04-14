@@ -1,77 +1,87 @@
 import csv
 import cv2
+import os
 import numpy as np
+import sklearn
+import sklearn.utils
 
-
+from sklearn.model_selection import train_test_split
 
 
 from keras.models import Sequential
 from keras.layers import Input, Dense, Flatten, Dropout
-from keras.layers import Lambda
-from keras.layers import Convolution2D
+from keras.layers import Lambda, Cropping2D
+from keras.layers import Conv2D
 from keras.layers.pooling import MaxPooling2D
 
 from keras.preprocessing.image import ImageDataGenerator
 
 
-lines = []
+samples = []
 
 with open('./data/driving_log.csv') as csvfile:
     reader = csv.reader(csvfile)
     for line in reader:
-        lines.append(line)
+        samples.append(line)
+
+del samples[0]
+
+train_samples, validation_samples = train_test_split(samples,test_size=0.2)
+
+
+def generator(samples,batch_size=32):
+    num_samples = len(samples)
+    col_size = 160
+    row_size = 80
+    while 1:
+        sklearn.utils.shuffle(samples)
+        for offset in range(0,num_samples,batch_size):
+            batch_samples = samples[offset:offset+batch_size]
+
+            images = []
+            angles = []
+
+            for batch_sample in batch_samples:
+                name = './data/IMG/' + batch_sample[0].split('/')[-1]
+                center_image = cv2.imread(name)
+                center_image = cv2.resize(center_image,(col_size,row_size),interpolation=cv2.INTER_AREA)
+                center_angle = float(batch_sample[3])
+                fliped_image = cv2.flip(center_image,1)
+
+
+                # create adjusted steering measurements for the side camera images
+                correction = 0.02  # this is a parameter to tune
+                steering_left = center_angle + correction
+                steering_right = center_angle - correction
+
+                img_left = cv2.imread('./data/IMG/' + batch_sample[1].split('/')[-1])
+                img_left = cv2.resize(img_left, (col_size, row_size), interpolation=cv2.INTER_AREA)
+                img_right = cv2.imread('./data/IMG/' + batch_sample[2].split('/')[-1])
+                img_right = cv2.resize(img_right, (col_size, row_size), interpolation=cv2.INTER_AREA)
+                images.extend([center_image,fliped_image,img_left,img_right])
+                angles.extend([center_angle,center_angle*-1.0,steering_left,steering_right])
+
+        X_train = np.array(images)
+        y_train = np.array(angles)
+
+        yield sklearn.utils.shuffle(X_train,y_train)
 
 
 
 
-images = []
-measurements = []
+train_generator = generator(train_samples,batch_size=32)
+validation_generator = generator(validation_samples,batch_size=32)
 
-for i,line in enumerate(lines):
-    if line[3] == 'steering':
-        continue
-    source_path = line[0]
-    filename = source_path.split('/')[-1]
-    current_path = './data/IMG/' +filename
-    image = cv2.imread(current_path)
-    images.append(image)
-    measurement = float(line[3])
-    measurements.append(measurement)
-
-
-measurements = np.array(measurements)
-images_flipped = np.fliplr(images)
-measurements_flipped = -measurements
-
-images = np.concatenate((images, images_flipped))
-measurements = np.concatenate((measurements,measurements_flipped))
-
-X_train = images
-y_train = measurements
-
-print(X_train.shape)
-
-new_height = 160
-new_width = 80
+col = 160
+row = 80
 ch = 3
-
-def preprocess(image):
-    import tensorflow as tf
-    resized = tf.image.resize_images(image, (new_height, new_width), method=0)
-    normalized = resized/255.0 - 0.5
-    return normalized
-
-#datagen = ImageDataGenerator(rescale=1./2)
-
-# compute quantities required for featurewise normalization
-# (std, mean, and principal components if ZCA whitening is applied)
-#datagen.fit(X_train)
 
 
 model = Sequential()
-model.add(Lambda(lambda x: preprocess(x), input_shape=(160,320, 3), output_shape=(new_width,new_height,3)))
-model.add(Convolution2D(32, 3, 3, border_mode='valid',activation='relu' ))
-model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='relu'))
+model.add(Lambda(lambda x: x/255.0 - 0.5, input_shape=(row,col,ch),output_shape=(row,col,ch)))
+model.add(Cropping2D(cropping=((30,10), (0,0))))
+model.add(Conv2D(32, kernel_size =(3, 3), padding='valid',activation='relu' ))
+model.add(Conv2D(64, kernel_size =( 3, 3), padding='valid', activation='relu'))
 model.add(MaxPooling2D(pool_size=(2, 2)))
 model.add(Dropout(0.25))
 model.add(Flatten())
@@ -81,8 +91,7 @@ model.add(Dense(1))
 
 
 model.compile(loss='mse', optimizer='adam')
-#model.fit_generator(datagen.flow(X_train, y_train, batch_size=32), samples_per_epoch=len(X_train))
-model.fit(X_train,y_train,validation_split=0.2,shuffle=True,nb_epoch=5)
+model.fit_generator(train_generator, steps_per_epoch= len(train_samples)*3/32, validation_data=validation_generator, validation_steps=len(validation_samples)*3/32, epochs=3)
 
 
 model.save('model.h5')
