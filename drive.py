@@ -66,7 +66,7 @@ def telemetry(sid, data):
         col_size = 160
         row_size = 80
 
-        image = cv2.resize(image, (col_size, row_size), interpolation=cv2.INTER_AREA)
+        image_array = cv2.resize(image_array, (col_size, row_size), interpolation=cv2.INTER_AREA)
 
         steering_angle = float(model.predict(image_array[None, :, :, :], batch_size=1))
 
