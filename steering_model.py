@@ -4,6 +4,7 @@ import os
 import numpy as np
 import sklearn
 import sklearn.utils
+import math
 
 from sklearn.model_selection import train_test_split
 
@@ -71,33 +72,29 @@ def generator(samples,batch_size=32):
             angles = []
             zero_steering = 0
             for batch_sample in batch_samples:
+                # Choose left / right / center image and compute new angle
+                angle = float(batch_sample[3])
+                img_choice = np.random.randint(3)
+                if img_choice == 0:
+                    img_path = './data/IMG/' + batch_sample[1].split('/')[-1]
+                    angle += 0.2
+                elif img_choice == 1:
+                    img_path = './data/IMG/' + batch_sample[0].split('/')[-1]
+                else:
+                    img_path = './data/IMG/' + batch_sample[2].split('/')[-1]
+                    angle -= 0.2
+                image = cv2.imread(img_path)
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                shape = image.shape
+#                image = image[math.floor(shape[0] / 5):shape[0] - 25, 0:shape[1]]
+                image = cv2.resize(image,(col_size,row_size),interpolation=cv2.INTER_AREA)
+                ind_flip = np.random.randint(2)
+                if ind_flip == 0:
+                    image = cv2.flip(image, 1)
+                    angle = -angle
 
-                center_angle = float(batch_sample[3])
-                # remove 70% from data when the car in driving straight ahead in order to prevent bias for driving straigth
-                if ((zero_steering < max_zero_steering) and abs(center_angle) < 0.01) or abs(center_angle) > 0.01:
-                    name = './data/IMG/' + batch_sample[0].split('/')[-1]
-                    center_image = cv2.imread(name)
-                    center_image = cv2.cvtColor(center_image, cv2.COLOR_BGR2RGB)
-                    center_image = cv2.resize(center_image,(col_size,row_size),interpolation=cv2.INTER_AREA)
-                    fliped_image = cv2.flip(center_image,1)
-                    zero_steering += 1
-
-                    # create new translated image
-                    image_trans, y_steer = trans_image(center_image, center_angle, 100)
-
-                    # create adjusted steering measurements for the side camera images
-                    correction = 0.15
-                    steering_left = center_angle + correction
-                    steering_right = center_angle - correction
-
-                    img_left = cv2.imread('./data/IMG/' + batch_sample[1].split('/')[-1])
-                    img_left = cv2.cvtColor(img_left, cv2.COLOR_BGR2RGB)
-                    img_left = cv2.resize(img_left, (col_size, row_size), interpolation=cv2.INTER_AREA)
-                    img_right = cv2.imread('./data/IMG/' + batch_sample[2].split('/')[-1])
-                    img_right = cv2.cvtColor(img_right, cv2.COLOR_BGR2RGB)
-                    img_right = cv2.resize(img_right, (col_size, row_size), interpolation=cv2.INTER_AREA)
-                    images.extend([center_image,image_trans,fliped_image,img_left,img_right])
-                    angles.extend([center_angle,y_steer,center_angle*-1.0,steering_left,steering_right])
+                images.extend([image])
+                angles.extend([angle])
 
         X_train = np.array(images)
         y_train = np.array(angles)
@@ -115,7 +112,8 @@ validation_generator = generator(validation_samples,batch_size=32)
 
 model = Sequential()
 model.add(Lambda(lambda x: x/255.0 - 0.5, input_shape=(row,col,ch),output_shape=(row,col,ch)))
-model.add(Cropping2D(cropping=((int(1/5*col),25), (0,0))))
+model.add(Cropping2D(cropping=((30,10), (0,0))))
+#model.add(Convolution2D(3, kernel_size =(3, 3), padding='same'))
 model.add(Convolution2D(32, kernel_size =(5, 5), strides =(2, 2), padding='valid'))
 model.add(Dropout(0.5))
 model.add(Activation('relu'))
@@ -123,6 +121,7 @@ model.add(Convolution2D(64, kernel_size =(5, 5), strides =(2, 2), padding='valid
 model.add(Dropout(0.5))
 model.add(Activation('relu'))
 model.add(Convolution2D(128, kernel_size =( 3, 3)))
+model.add(Dropout(0.5))
 model.add(Activation('relu'))
 # 64@3x13
 model.add(Flatten())
@@ -137,7 +136,7 @@ checkpoint = ModelCheckpoint('model.h5',
                              save_best_only=True,
                              mode='auto')
 
-model = Model.load_model('model.h5')
+#model = Model.load_model('model.h5')
 model.compile(loss='mse', optimizer='adam')
 history_object = model.fit_generator(train_generator, steps_per_epoch= len(train_samples)/32, validation_data=validation_generator,
                                      validation_steps=len(validation_samples)/32, epochs=2,callbacks=[checkpoint],verbose=1)
