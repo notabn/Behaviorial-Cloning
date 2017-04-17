@@ -36,7 +36,6 @@ with open('./data/driving_log.csv') as csvfile:
 
 
 set_size= len(samples)
-
 train_samples = samples[:math.floor(set_size*0.8)]
 validation_samples =  samples[math.floor(set_size*0.8):]
 
@@ -129,6 +128,10 @@ validation_generator = generator(validation_samples,batch_size=32)
 
 
 
+
+'''
+
+
 def create_model():
     model = Sequential()
     model.add(Lambda(lambda x: x/255.0 - 0.5, input_shape=(row_size,col_size,ch),output_shape=(row_size,col_size,ch)))
@@ -168,6 +171,7 @@ for i in range(8):
 
     pr_threshold = 1/(i+1)
 
-model.save('model_max.h5')
+model.save('model.h5')
 
 
+'''
