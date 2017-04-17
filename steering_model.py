@@ -15,7 +15,7 @@ from keras.layers import Input, Dense, Flatten, Dropout,Activation
 from keras.layers import Lambda, Cropping2D
 from keras.layers import Convolution2D
 from keras.layers.pooling import MaxPooling2D
-from keras.callbacks import ModelCheckpoint
+from keras.callbacks import ModelCheckpoint,EarlyStopping
 import matplotlib.pyplot as plt
 import keras.models as Model
 import math
@@ -28,9 +28,9 @@ with open('./data/driving_log.csv') as csvfile:
     reader = csv.reader(csvfile)
     next(reader)
     for line in reader:
-        angle = float(line[3])
-        if angle == 0 and np.random.random() > 0.75:
-            continue
+        #angle = float(line[3])
+        #if angle == 0 and np.random.random() > 0.75:
+        #    continue
         samples.append(line)
 
 
@@ -72,35 +72,42 @@ def trans_image(image, steer, trans_range):
 
 def generator(samples,batch_size=32):
     num_samples = len(samples)
-    sklearn.utils.shuffle(samples)
     while True:
+        sklearn.utils.shuffle(samples)
         images = []
         angles = []
         for i_batch in range(batch_size):
             i_line = np.random.randint(len(samples))
             batch_sample = samples[i_line]
-
-            # Choose left / right / center image and compute new angle
-            angle = float(batch_sample[3])
-            img_choice = np.random.randint(3)
-            if img_choice == 0:
-                img_path = './data/IMG/' + batch_sample[1].split('/')[-1]
-                angle += 0.25
-            elif img_choice == 1:
-                img_path = './data/IMG/' + batch_sample[0].split('/')[-1]
-            else:
-                img_path = './data/IMG/' + batch_sample[2].split('/')[-1]
-                angle -= 0.25
-            image = cv2.imread(img_path)
-            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-            image, angle = trans_image(image, angle, 100)
-            shape = image.shape
-            image = image[math.floor(shape[0] / 5):shape[0] - 25, 0:shape[1]]
-            image = cv2.resize(image,(col_size,row_size),interpolation=cv2.INTER_AREA)
-            ind_flip = np.random.randint(2)
-            if ind_flip == 0:
-                image = cv2.flip(image, 1)
-                angle = -angle
+            keep_pr = 0
+            while keep_pr == 0:
+                # Choose left / right / center image and compute new angle
+                angle = float(batch_sample[3])
+                img_choice = np.random.randint(3)
+                if img_choice == 0:
+                    img_path = './data/IMG/' + batch_sample[1].split('/')[-1]
+                    angle += 0.25
+                elif img_choice == 1:
+                    img_path = './data/IMG/' + batch_sample[0].split('/')[-1]
+                else:
+                    img_path = './data/IMG/' + batch_sample[2].split('/')[-1]
+                    angle -= 0.25
+                image = cv2.imread(img_path)
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                image, angle = trans_image(image, angle, 120)
+                shape = image.shape
+                image = image[math.floor(shape[0] / 5):shape[0] - 25, 0:shape[1]]
+                image = cv2.resize(image,(col_size,row_size),interpolation=cv2.INTER_AREA)
+                ind_flip = np.random.randint(2)
+                if ind_flip == 0:
+                    image = cv2.flip(image, 1)
+                    angle = -angle
+                if abs(angle) < .1:
+                    pr_val = np.random.uniform()
+                    if pr_val < pr_threshold:
+                        keep_pr = 1
+                else:
+                    keep_pr = 1
             images.append(image)
             angles.append(angle)
 
@@ -122,68 +129,45 @@ validation_generator = generator(validation_samples,batch_size=32)
 
 
 
-'''
-model = Sequential()
-model.add(Lambda(lambda x: x/255.0 - 0.5, input_shape=(row_size,col_size,ch),output_shape=(row_size,col_size,ch)))
-model.add(Convolution2D(32, kernel_size =(5, 5),strides=(2,2), padding='valid',activation='relu'))
-model.add(Convolution2D(64, kernel_size =(5, 5),strides=(2,2), padding='valid',activation='relu' ))
-model.add(Convolution2D(128, kernel_size =( 5, 5), padding='valid'))
-model.add(Convolution2D(128, kernel_size =( 3, 3), padding='valid',activation='relu' ))
-model.add(Convolution2D(128, kernel_size =( 3, 3), padding='valid',activation='relu' ))
-# 64@3x13
-model.add(Flatten())
-model.add(Dense(512, activation='relu'))
-model.add(Dropout(0.5))
-model.add(Dense(64, activation='relu'))
-model.add(Dropout(0.5))
-model.add(Dense(32, activation='relu'))
-model.add(Dropout(0.5))
-model.add(Dense(1))
-'''
-
 def create_model():
     model = Sequential()
     model.add(Lambda(lambda x: x/255.0 - 0.5, input_shape=(row_size,col_size,ch),output_shape=(row_size,col_size,ch)))
-    model.add(Convolution2D(32, 3, 3, border_mode='valid',activation='elu' ))
-    model.add(Convolution2D(64, 3, 3, border_mode='valid', activation='elu'))
-    model.add(Convolution2D(128, 3, 3, border_mode='valid', activation='elu'))
+    model.add(Convolution2D(32, (3, 3), border_mode='same', activation='elu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Convolution2D(32, (3, 3), border_mode='valid',activation='elu' ))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Activation('elu'))
+    model.add(Convolution2D(64, (3, 3), border_mode='valid', activation='elu'))
+    model.add(MaxPooling2D(pool_size=(2, 2)))
+    model.add(Activation('elu'))
     model.add(Flatten())
     model.add(Dense(128, activation='elu'))
-    #model.add(Dropout(0.5))
+    model.add(Dropout(0.5))
     model.add(Dense(64, activation='elu'))
-    #model.add(Dropout(0.5))
+    model.add(Dropout(0.5))
+    model.add(Dense(32, activation='elu'))
+    model.add(Dropout(0.5))
     model.add(Dense(1))
 
     return model
 
 
+#stop = EarlyStopping(monitor='val_loss', min_delta=0, patience=1, verbose=0, mode='auto')
 
-
-checkpoint = ModelCheckpoint('new_model.h5', monitor='val_loss',  verbose=0,save_best_only=True, mode='auto')
+#checkpoint = ModelCheckpoint('new_model.h5', monitor='val_loss',  verbose=0,save_best_only=True, mode='auto')
 
 model = create_model()
 model.compile(loss='mse', optimizer='adam')
-history_object = model.fit_generator(train_generator, steps_per_epoch= len(train_samples)/32, validation_data=validation_generator,
-                                 validation_steps=len(validation_samples)/32, epochs=3,verbose=1,callbacks = [checkpoint])
 
-model.save('new_model.h5')
-
-'''
-plt.close()
-
-for i in range(10):
-    X_train, angles = next(train_generator)
-    print(X_train.shape)
-    fig = plt.figure()
-    plt.hist(angles, bins=100)
+pr_threshold = 1
 
 
-plot the training and validation loss for each epoch
-plt.plot(history_object.history['loss'])
-plt.plot(history_object.history['val_loss'])
-plt.title('model mean squared error loss')
-plt.ylabel('mean squared error loss')
-plt.xlabel('epoch')
-plt.legend(['training set', 'validation set'], loc='upper right')
-plt.show()
-'''
+for i in range(8):
+    model.fit_generator(train_generator, steps_per_epoch= len(train_samples)/32, validation_data=validation_generator,
+                                 validation_steps=len(validation_samples)/32, epochs=1,verbose=1)
+
+    pr_threshold = 1/(i+1)
+
+model.save('model_max.h5')
+
+
