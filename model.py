@@ -128,10 +128,6 @@ validation_generator = generator(validation_samples,batch_size=32)
 
 
 
-
-'''
-
-
 def create_model():
     model = Sequential()
     model.add(Lambda(lambda x: x/255.0 - 0.5, input_shape=(row_size,col_size,ch),output_shape=(row_size,col_size,ch)))
@@ -174,4 +170,3 @@ for i in range(8):
 model.save('model.h5')
 
 
-'''
